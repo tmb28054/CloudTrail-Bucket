@@ -1,0 +1,131 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: I provide a logging bucket.
+Resources:
+  Bucket:
+    DependsOn:
+      - QueuePolicy
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: botthouse-logs
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - ExpirationInDays: 1
+            NoncurrentVersionExpirationInDays: 1
+            Status: Enabled
+          - AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+            Status: Enabled
+          - NoncurrentVersionExpirationInDays: 1
+            Status: Enabled
+      NotificationConfiguration:
+        QueueConfigurations:
+          - Event: s3:ObjectCreated:Put
+            Queue: !GetAtt Queue.Arn
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref Bucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          # Deny access to bucket if the API call was not made using HTTPS
+          - Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt Bucket.Arn
+              - !Sub ${Bucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+          # Allow Account IAM
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: s3:*
+            Resource:
+              - !GetAtt Bucket.Arn
+              - !Sub ${Bucket.Arn}/*
+          # CloudTrail
+          - Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - s3:PutObject
+            Resource:
+              - !Sub ${Bucket.Arn}/*
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+          - Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action:
+              - s3:GetBucketAcl
+            Resource:
+              - !GetAtt Bucket.Arn
+
+  DLQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 3600
+
+  Queue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 900
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DLQueue.Arn
+        maxReceiveCount: 3
+
+  QueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref Queue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "*"
+            Action: SQS:SendMessage
+            Resource: "*"
+            Condition:
+              ArnLike:
+                aws:SourceArn: arn:aws:s3:::botthouse-logs
+
+  ConsumerPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub Policy to be used by a consumer for ${AWS::StackName}.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetBucketLocation
+              - s3:GetObject
+              - sqs:*Message*
+              - sqs:List*
+              - sqs:Get*
+            Resource:
+              - !GetAtt Bucket.Arn
+              - !Sub ${Bucket.Arn}/*
+              - !GetAtt Queue.Arn
+          - Effect: Deny
+            Action:
+              - sqs:Send*
+            Resource:
+              - !GetAtt Queue.Arn
