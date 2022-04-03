@@ -14,14 +14,17 @@ Resources:
               SSEAlgorithm: AES256
       LifecycleConfiguration:
         Rules:
-          - ExpirationInDays: 1
-            NoncurrentVersionExpirationInDays: 1
+          - Id: DeleteAfter7Days
             Status: Enabled
-          - AbortIncompleteMultipartUpload:
+            ExpirationInDays: 7
+          - Id: AbortIncompleteMultipartUpload
+            AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 1
             Status: Enabled
-          - NoncurrentVersionExpirationInDays: 1
+          - Id: NoncurrentVersion
+            NoncurrentVersionExpirationInDays: 1
             Status: Enabled
+            ExpiredObjectDeleteMarker: true
       NotificationConfiguration:
         QueueConfigurations:
           - Event: s3:ObjectCreated:Put
